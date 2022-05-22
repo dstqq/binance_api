@@ -19,7 +19,7 @@ bot = Bot(token=token, parse_mode=types.ParseMode.HTML)
 dp = Dispatcher(bot)
 
 zeros_list = ["0.00000000", "0.00", "0.0", "0"]
-
+DEBAG = True
 
 client = Spot(key=api_key, secret=api_secret)
 logger = logging.getLogger(__name__)
@@ -34,43 +34,68 @@ def cryptocurrency_round(value: str):
     s = float(value)
     return round(s, 2)
 
-def create_InlineKeyboard(keys: list, ):
-    keyboard = types.InlineKeyboardMarkup()
-    callback_button_back = types.InlineKeyboardButton(text='<', callback_data='back')
-    callback_button_ahead = types.InlineKeyboardButton(text='>', callback_data='ahead')
-    callback_button_first = types.InlineKeyboardButton(text='1', callback_data='1')
-    callback_button_last = types.InlineKeyboardButton(text=f'{math.ceil(len(keys)/15)}', callback_data=f'{math.ceil(len(keys)/15)}')
-    callback_button_second = types.InlineKeyboardButton(text='2', callback_data='2')
-    keyboard.row(callback_button_back, callback_button_first, callback_button_last, callback_button_ahead)
 
+def create_InlineKeyboard(keys: list, index=1):
+    keyboard = types.InlineKeyboardMarkup()
+    callback_button_back = types.InlineKeyboardButton(text='<', callback_data=f'back|{len(keys)}|{index}')
+    callback_button_ahead = types.InlineKeyboardButton(text='>', callback_data=f'ahead|{len(keys)}|{index}')
+    callback_button_first = types.InlineKeyboardButton(text='1', callback_data=f'1|{len(keys)}')
+    keyboard.row(callback_button_back, callback_button_first)
+    if math.ceil(len(keys)/15) <= 5:  # (1-75)
+        for i in range(1, math.ceil(len(keys)/15)):
+            key = types.InlineKeyboardButton(text=str(i+1), callback_data=f'{i+1}|{len(keys)}')
+            keyboard.insert(key)
+        keyboard.insert(callback_button_ahead)
+    else:
+        if index in range(1, 4):  # first 3 buttons
+            keyboard.insert(types.InlineKeyboardButton(text=f'2', callback_data=f'2|{len(keys)}'))
+            keyboard.insert(types.InlineKeyboardButton(text=f'3', callback_data=f'3|{len(keys)}'))
+            keyboard.insert(types.InlineKeyboardButton(text=f'4..', callback_data=f'4|{len(keys)}'))
+        elif index in range(math.ceil(len(keys)/15)-2, math.ceil(len(keys)/15)+1):  # last 3 buttons
+            keyboard.insert(types.InlineKeyboardButton(text=f'..{math.ceil(len(keys)/15)-3}', callback_data=f'{math.ceil(len(keys)/15)-3}|{len(keys)}'))
+            keyboard.insert(types.InlineKeyboardButton(text=f'{math.ceil(len(keys)/15)-2}', callback_data=f'{math.ceil(len(keys)/15)-2}|{len(keys)}'))
+            keyboard.insert(types.InlineKeyboardButton(text=f'{math.ceil(len(keys)/15)-1}', callback_data=f'{math.ceil(len(keys)/15)-1}|{len(keys)}'))
+        else:
+            keyboard.insert(types.InlineKeyboardButton(text=f'..{index-1}', callback_data=f'{index-1}|{len(keys)}'))
+            keyboard.insert(types.InlineKeyboardButton(text=f'{index}', callback_data=f'{index}|{len(keys)}'))
+            keyboard.insert(types.InlineKeyboardButton(text=f'{index+1}..', callback_data=f'{index+1}|{len(keys)}'))
+        keyboard.insert(types.InlineKeyboardButton(text=f'{math.ceil(len(keys)/15)}', callback_data=f'{math.ceil(len(keys)/15)}|{len(keys)}'))
+        keyboard.insert(callback_button_ahead)
+    
     return keyboard
 
 
 async def get_top_coin_cmc(message: types.Message):
     text = message.text[4:]
     text = re.sub(r' *_*-*', '', text)  # delete all '_', '-' and ' ' symbols
-    text = int(text)-1 % 200+1 if text.isdigit() else 100
-    prices = get_top_cryptocurrencies(text)
+    length = int(text)-1 % 200+1 if text.isdigit() else 100
 
-    response = f'Top {text} cryptocurrencies:\n'
-    keys = list(prices.keys())
-    for i in range(16):
+    with open('coin_price.json', 'r') as f:
+        prices = json.load(f)
+        if time.time() - prices['time'] > 5:
+            prices = get_top_cryptocurrencies()  # {'ETH': 2000.009, 'BTC': 4000.12, 'DOGE': 0.1093} 
+
+    response = f'Top {length}(1-15) cryptocurrencies:\n' if length not in range(16) else f'Top {length} cryptocurrencies:\n'
+    keys = list(prices.keys())[1:length+1]  # prices['time'] ignore
+    for i in range(15):
         if i in range(len(keys)):
             response += f'{keys[i]}: {round(prices[keys[i]], 4)}$\n'
 
-    if text in range(16):
+    if length in range(16):
         await bot.send_message(message.from_user.id, text=response)
     else:
         keyboard = create_InlineKeyboard(keys=keys)
+        await bot.send_message(message.from_user.id, text=response, reply_markup=keyboard)
 
 
-def get_top_cryptocurrencies(len: int) -> dict:
+def get_top_cryptocurrencies(len=200) -> dict:
     cmc = CoinMarketCapAPI(coinmarketcap_api)
     r = cmc.cryptocurrency_listings_latest(limit=len)
-    prices = {}
+    prices = {'time': time.time()}
     for cryptocurrency in r.data:
         prices[cryptocurrency["symbol"]] = cryptocurrency["quote"]["USD"]["price"]
-
+    with open('coin_price.json', 'w') as f:
+        json.dump(prices, f)
     return prices
 
 
@@ -181,14 +206,27 @@ def get_account_snapshot():
         json.dump(status, file)
 
 
-def get_deposit_adress(coin):
-    return client.deposit_address(coin)
+@dp.callback_query_handler()  # lambda c: c.data == 'a1'
+async def on_first_button_first_answer(callback_query: types.CallbackQuery):
+    command, total_amount, *index = callback_query.data.split('|')  # ['ahead', '100', '1'] -> command, total_amount, index
+    total_amount = int(total_amount)
+    if command == 'ahead':
+        index = int(index[0]) % math.ceil(total_amount/15) + 1
+    elif command == 'back':
+        index = (int(index[0])-2) % math.ceil(total_amount/15) + 1
+    else:
+        index = int(command)
 
+    response = f'Top {total_amount}({15*(index-1)+1}-{15*index if 15*index < total_amount else total_amount}) cryptocurrencies:\n'
+    with open('coin_price.json', 'r') as f:
+        prices = json.load(f)
+        keys = list(prices.keys())[1:total_amount+1]  # prices['time'] igonre
+    for i in range(15*(index-1), 15*index):
+        if i in range(len(keys)):
+            response += f'{keys[i]}: {round(prices[keys[i]], 4)}$\n'
 
-def get_saving_account():
-    a = client.savings_flexible_products()
-    with open('a.json', 'w') as f:
-        json.dump(a, f)
+    keyboard = create_InlineKeyboard(keys=keys, index=index)
+    await bot.edit_message_text(response, callback_query.message.chat.id, callback_query.message.message_id, reply_markup=keyboard)
 
 
 @dp.message_handler(commands=['mining_stat'])
@@ -223,6 +261,5 @@ if __name__ == "__main__":
     # print(get_mining_info())
     # print(get_funding_wallet())
     # get_account_snapshot()
-    # print(get_deposit_adress('BNB'))
-    # get_saving_account()
+    # get_top_cryptocurrencies(200)
     executor.start_polling(dp, skip_updates=True)
