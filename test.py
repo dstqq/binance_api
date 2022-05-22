@@ -1,15 +1,26 @@
+import imp
+import re
+
 s = '20580051.56'  # '9544372'
 s = int(s.split('.')[0])
 print(round(s/1000000, 2))
-from http import client
-from binance.spot import Spot
-import time
+text = 'sdads'
+# if text.startswith(('_', ' ')):
+#     print('_______________')
 
-client = Spot()
-a = 1652486399000
-print(a)
-print(int(a))
-print(time.time())
-print(time.ctime(int(str(client.time()['serverTime'])[:10])))
+def get_top_coin_cmc(text: str):
+    text = re.sub(r' *_*', '', text)  # delete all '_' and ' ' symbols
+    text = int(text)-1 % 200+1 if text.isdigit() else 100
+    print(text)
 
-print(float('0.00189685'))
+
+di = {'ETH': 2000.009, 'BTC': 4000.12, 'DOGE': 0.1093}
+response = ''
+key = list(di.keys())
+for i in range(0, 5):
+    if i in range(len(key)):
+        response += f'{key[i]}: {di[key[i]]}\n'
+print(response, end=f'\n{"-"*20}\n')
+t = 16
+import math
+print(math.ceil(t/15))

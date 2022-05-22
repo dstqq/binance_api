@@ -1,4 +1,5 @@
 from aiogram import Bot, Dispatcher, executor, types
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from coinmarketcapapi import CoinMarketCapAPI, CoinMarketCapAPIError
 from binance.spot import Spot
@@ -7,9 +8,11 @@ from binance.error import ClientError
 
 from cfg import api_key, api_secret, token, admin, coinmarketcap_api
 
+import re
 import time
 import json
 import logging
+import math
 
 
 bot = Bot(token=token, parse_mode=types.ParseMode.HTML)
@@ -22,14 +25,43 @@ client = Spot(key=api_key, secret=api_secret)
 logger = logging.getLogger(__name__)
 
 
-def hashrate_round(value:str) -> int:
+def hashrate_round(value: str) -> int:
     s = int(value.split('.')[0])
     return round(s/1000000, 2)
 
-        
-def cryptocurrency_round(value:str):
+
+def cryptocurrency_round(value: str):
     s = float(value)
     return round(s, 2)
+
+def create_InlineKeyboard(keys: list, ):
+    keyboard = types.InlineKeyboardMarkup()
+    callback_button_back = types.InlineKeyboardButton(text='<', callback_data='back')
+    callback_button_ahead = types.InlineKeyboardButton(text='>', callback_data='ahead')
+    callback_button_first = types.InlineKeyboardButton(text='1', callback_data='1')
+    callback_button_last = types.InlineKeyboardButton(text=f'{math.ceil(len(keys)/15)}', callback_data=f'{math.ceil(len(keys)/15)}')
+    callback_button_second = types.InlineKeyboardButton(text='2', callback_data='2')
+    keyboard.row(callback_button_back, callback_button_first, callback_button_last, callback_button_ahead)
+
+    return keyboard
+
+
+async def get_top_coin_cmc(message: types.Message):
+    text = message.text[4:]
+    text = re.sub(r' *_*-*', '', text)  # delete all '_', '-' and ' ' symbols
+    text = int(text)-1 % 200+1 if text.isdigit() else 100
+    prices = get_top_cryptocurrencies(text)
+
+    response = f'Top {text} cryptocurrencies:\n'
+    keys = list(prices.keys())
+    for i in range(16):
+        if i in range(len(keys)):
+            response += f'{keys[i]}: {round(prices[keys[i]], 4)}$\n'
+
+    if text in range(16):
+        await bot.send_message(message.from_user.id, text=response)
+    else:
+        keyboard = create_InlineKeyboard(keys=keys)
 
 
 def get_top_cryptocurrencies(len: int) -> dict:
@@ -38,11 +70,12 @@ def get_top_cryptocurrencies(len: int) -> dict:
     prices = {}
     for cryptocurrency in r.data:
         prices[cryptocurrency["symbol"]] = cryptocurrency["quote"]["USD"]["price"]
-    
+
     return prices
 
 
-def get_crypto_prices_cmc(assets_count: dict) -> dict:  # 200 firsts market cap coins
+# 200 firsts market cap coins
+def get_crypto_prices_cmc(assets_count: dict) -> dict:
     cmc = CoinMarketCapAPI(coinmarketcap_api)
     r = cmc.cryptocurrency_listings_latest(limit=200)
 
@@ -182,18 +215,10 @@ async def send_spot_wallet(message: types.Message):
 @dp.message_handler(types.Message)
 async def text_handler(message: types.Message):
     if message.text.startswith('/top'):
-        if message.text[4] in (' ', '_'):
-            if message.text[5:].isdigit:
-                len = int(message.text[5:])
-                if len <= 200:
-                    prices = get_top_cryptocurrencies(len=len)
-                    response = f"Top {len} cryptocurrencies:\n"
-                    for key in prices.keys():
-                        response += f"{key} {round(prices[key], 4)}\n"
-                    await bot.send_message(message.from_user.id, text=response)
+        await get_top_coin_cmc(message)
 
 
-if __name__ == "__main__": 
+if __name__ == "__main__":
     # get_spot_account_info()
     # print(get_mining_info())
     # print(get_funding_wallet())

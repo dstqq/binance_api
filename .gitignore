@@ -1,4 +1,5 @@
 __pycache__
 *.pyc 
 cfg.py
+test.py
 *.json
